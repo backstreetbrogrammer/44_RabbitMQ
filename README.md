@@ -35,8 +35,8 @@ order.
 
 Sequence can be modified by:
 
-- adding entities to the beginning or to the end
-- removing from the beginning or from the end
+- adding entities to the back / tail / rear
+- removing from the front / head
 
 **_Synchronous Communication_**
 
@@ -498,7 +498,7 @@ Use `Get messages` pane to consume or get the message:
 
 - **Ack mode**
 
-Reject, Nack(negative ack - reject extension), Ack; requeue refers to Dead Letter Exchange (DLX)
+Reject, Nack (negative ack - reject extension), Ack; requeue refers to Dead Letter Exchange (DLX)
 
 Requeued message is placed to its original position if possible. If not, the message will be requeued closer to the
 queue head (concurrent deliveries and acknowledgements from consumers).
@@ -518,4 +518,82 @@ We can see that the same message is consumed as it was published before.
 ---
 
 ## Chapter 04. RabbitMQ Hands On
+
+### Simple Queue
+
+![SimpleQueue](SimpleQueue.PNG)
+
+A Simple Queue could be used in scenarios like:
+
+- Easy code split without multithreading
+- Connect two processes written in different technologies
+
+**_Hands on_**
+
+- Start RabbitMQ and open Web Admin
+- Create a new queue:
+
+![AddSimpleQueue](AddSimpleQueue.PNG)
+
+- Publish two persistent Json messages one by one:
+
+```json
+{
+  "message": "Hello Students #1"
+}
+```
+
+```json
+{
+  "message": "Hello Students #2"
+}
+```
+
+![PublishSimpleQueue](PublishSimpleQueue.PNG)
+
+- Consume both the messages one by one:
+
+![ConsumeSimpleQueue](ConsumeSimpleQueue.PNG)
+
+Notice that clicking the "Get Messages" button the third time shows a pop-up as Queue is empty.
+
+**_Queues - Persistency and Durability_**
+
+**_Durability_**
+
+AMQP property for **queues** and **exchanges**.
+
+Messages in durable entities can survive server restarts, by being automatically recreated when server gets up.
+
+**_Persistence_**
+
+**Messages** property.
+
+Stored on disk in special persistence log file, allowing them to be restored once server gets up. Persistence has no
+effect on non-durable queues.
+
+Persistent messages are **removed** from a **durable queue** once they are consumed (and acknowledged).
+
+As default messages won't survive RabbitMQ restart or entire server restarts. To ensure messages survive, make sure to:
+
+- Send message as persistent message
+
+```
+channel.basicPublish("", WORK_QUEUE_NAME, 
+                     /*props*/ MessageProperties.PERSISTENT_TEXT_PLAIN, 
+                     message.getBytes("UTF-8"));
+```
+
+- Publish into durable exchange
+
+```
+channel.exchangeDeclare(EXCHANGE_NAME, "topic", /*durable*/true);
+```
+
+- Message to be stored in durable queue
+
+```
+channel.queueDeclare(QUEUE_NAME, /*durable*/true, /*exclusive*/false, /*autoDelete*/false, /*arguments*/null);
+```
+
 
