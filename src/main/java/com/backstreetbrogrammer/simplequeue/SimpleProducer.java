@@ -22,6 +22,7 @@ public class SimpleProducer extends Thread {
 
         final ConnectionFactory factory = new ConnectionFactory();
         factory.setHost("localhost");
+        factory.setPort(5673);
 
         try (final Connection connection = factory.newConnection();
              final Channel channel = connection.createChannel()) {
@@ -45,8 +46,8 @@ public class SimpleProducer extends Thread {
                 channel.basicPublish(/*exchange*/"", /*routingKey*/ queueName,
                                                  null,
                                                  message.getBytes(StandardCharsets.UTF_8));
-                System.out.printf(" [x] Sent '%s'%n", message);
-                sleep(2000L);
+                System.out.printf(" [P] Sent '%s'%n", message);
+                sleep(1000L);
 
                 // alternative with TTL
 

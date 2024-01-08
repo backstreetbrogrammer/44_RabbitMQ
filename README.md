@@ -596,4 +596,221 @@ channel.exchangeDeclare(EXCHANGE_NAME, "topic", /*durable*/true);
 channel.queueDeclare(QUEUE_NAME, /*durable*/true, /*exclusive*/false, /*autoDelete*/false, /*arguments*/null);
 ```
 
+**_Code Example_**
 
+Producer:
+
+```java
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeoutException;
+
+public class SimpleProducer extends Thread {
+
+    private final String queueName;
+
+    public SimpleProducer(final String queueName) {
+        this.queueName = queueName;
+    }
+
+    @Override
+    public void run() {
+        System.out.println("--> Running producer");
+
+        final ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("localhost");
+        factory.setPort(5673);
+
+        try (final Connection connection = factory.newConnection();
+             final Channel channel = connection.createChannel()) {
+
+            // alternative with TTL
+            /*
+            Map<String, Object> args = new HashMap<String, Object>();
+            args.put("x-message-ttl", 60000);
+            channel.queueDeclare(queueName, false, false, false, args);
+            */
+
+            channel.queueDeclare(queueName,
+                    /*durable*/    false,
+                    /*exclusive*/  false,
+                    /*autoDelete*/ false,
+                    /*arguments*/  null);
+
+            for (int i = 0; i <= 5; i++) {
+                final String message = String.format("Hello Guidemy Students %d", i);
+
+                channel.basicPublish(/*exchange*/"", /*routingKey*/ queueName,
+                                                 null,
+                                                 message.getBytes(StandardCharsets.UTF_8));
+                System.out.printf(" [x] Sent '%s'%n", message);
+                sleep(1000L);
+
+                // alternative with TTL
+
+                // final AMQP.BasicProperties properties = new AMQP.BasicProperties.Builder()
+                //         .expiration("60000")
+                //         .build();
+                // channel.basicPublish(/*exchange*/ "", /*routingKey*/ queueName, properties, message.getBytes(StandardCharsets.UTF_8));
+            }
+        } catch (final IOException | InterruptedException | TimeoutException e) {
+            System.err.println(e.getMessage());
+        }
+    }
+}
+```
+
+Consumer:
+
+```java
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.DeliverCallback;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeoutException;
+
+public class SimpleConsumer extends Thread {
+    private final String queueName;
+
+    public SimpleConsumer(final String queueName) {
+        this.queueName = queueName;
+    }
+
+    @Override
+    public void run() {
+        try {
+            sleep(1000L);
+        } catch (final InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        System.out.println("--> Running consumer");
+
+        final ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("localhost");
+        factory.setPort(5673);
+
+        try (final Connection connection = factory.newConnection();
+             final Channel channel = connection.createChannel()) {
+
+            channel.queueDeclare(queueName,
+                    /*durable*/    false,
+                    /*exclusive*/  false,
+                    /*autoDelete*/ false,
+                    /*arguments*/  null);
+
+            System.out.println(" [*] Waiting for messages....");
+
+            final DeliverCallback deliverCallback = (consumerTag, delivery) -> {
+                final String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
+                System.out.printf(" [x] Received '%s'%n", message);
+            };
+
+            channel.basicConsume(queueName,
+                    /*autoAck*/ true,
+                                 deliverCallback,
+                                 consumerTag -> {
+                                 });
+        } catch (final IOException | TimeoutException e) {
+            System.err.println(e.getMessage());
+        }
+    }
+}
+```
+
+Main program for demo:
+
+```java
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Properties;
+
+public class SimpleQueueDemo {
+    private final static String QUEUE_NAME = "hello_students_queue";
+
+    public static void main(final String[] args) throws InterruptedException, IOException {
+        loadSystemProperties();
+
+        final SimpleProducer producer = new SimpleProducer(QUEUE_NAME);
+        producer.start();
+
+        final SimpleConsumer consumer = new SimpleConsumer(QUEUE_NAME);
+        consumer.start();
+
+        producer.join();
+        consumer.join();
+
+        System.out.println("Done");
+    }
+
+    private static void loadSystemProperties() throws IOException {
+        final Properties p = new Properties();
+        try (final InputStream inputStream = ClassLoader.getSystemResourceAsStream("rabbitmq.properties")) {
+            p.load(inputStream);
+        }
+        for (final String name : p.stringPropertyNames()) {
+            final String value = p.getProperty(name);
+            System.setProperty(name, value);
+        }
+    }
+
+}
+```
+
+We need to use `rabbitmq.properties` file in resources folder:
+
+```
+ERLANG_HOME=C:\\Program Files\\Erlang OTP\\erts-14.2
+RABBITMQ_NODE_PORT=5673
+RABBITMQ_DIST_PORT=25673
+RABBITMQ_NODENAME=rabbit1@localhost
+RABBITMQ_MNESIA_BASE=C:\\tmp\\rabbit1
+RABBITMQ_MNESIA_DIR=C:\\tmp\\rabbit1\\data
+RABBITMQ_LOG_BASE=C:\\tmp\\rabbit1\\logs
+RABBITMQ_CONFIG_FILE=C:\\RabbitMQ\\rabbitmq_server-3.12.10\\config\\rabbitmq
+RABBITMQ_ENABLED_PLUGINS_FILE=C:\\tmp\\rabbit1\\enabled_plugins
+```
+
+Before we run the demo program, need to start RabbitMQ server using `runRabbitMQ.bat`:
+
+```
+@ECHO OFF
+
+set ERLANG_HOME=C:\Program Files\Erlang OTP\erts-14.2
+set RABBITMQ_NODE_PORT=5673
+set RABBITMQ_DIST_PORT=25673
+set RABBITMQ_NODENAME=rabbit1@localhost
+set RABBITMQ_MNESIA_BASE=C:\tmp\rabbit1
+set RABBITMQ_MNESIA_DIR=C:\tmp\rabbit1\data
+set RABBITMQ_LOG_BASE=C:\tmp\rabbit1\logs
+set RABBITMQ_CONFIG_FILE=C:\RabbitMQ\rabbitmq_server-3.12.10\config\rabbitmq
+set RABBITMQ_ENABLED_PLUGINS_FILE=C:\tmp\rabbit1\enabled_plugins
+
+echo "====== Run RabbitMQ Server ======"
+
+cd "C:\RabbitMQ\rabbitmq_server-3.12.10\sbin"
+start rabbitmq-server.bat
+```
+
+Sample output of the demo program:
+
+```
+--> Running producer
+ [P] Sent 'Hello Guidemy Students 0'
+ [P] Sent 'Hello Guidemy Students 1'
+ [P] Sent 'Hello Guidemy Students 2'
+ [P] Sent 'Hello Guidemy Students 3'
+ [P] Sent 'Hello Guidemy Students 4'
+--> Running consumer
+ [C] Waiting for messages....
+ [C] Received 'Hello Guidemy Students 5'
+ [P] Sent 'Hello Guidemy Students 5'
+Done
+```

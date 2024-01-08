@@ -28,6 +28,7 @@ public class SimpleConsumer extends Thread {
 
         final ConnectionFactory factory = new ConnectionFactory();
         factory.setHost("localhost");
+        factory.setPort(5673);
 
         try (final Connection connection = factory.newConnection();
              final Channel channel = connection.createChannel()) {
@@ -38,11 +39,11 @@ public class SimpleConsumer extends Thread {
                     /*autoDelete*/ false,
                     /*arguments*/  null);
 
-            System.out.println(" [*] Waiting for messages....");
+            System.out.println(" [C] Waiting for messages....");
 
-            DeliverCallback deliverCallback = (consumerTag, delivery) -> {
-                String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
-                System.out.printf(" [x] Received '%s'%n", message);
+            final DeliverCallback deliverCallback = (consumerTag, delivery) -> {
+                final String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
+                System.out.printf(" [C] Received '%s'%n", message);
             };
 
             channel.basicConsume(queueName,
