@@ -19,6 +19,8 @@ Tools used:
     - [Exchange](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#exchange)
     - [Queue Concepts](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#queue-concepts)
 4. [RabbitMQ Hands On](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#chapter-04-rabbitmq-hands-on)
+    - [Simple Queue](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#simple-queue)
+    - [Work Queues or Task Queues](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#work-queues-or-task-queues)
 
 ---
 
@@ -814,3 +816,13 @@ Sample output of the demo program:
  [P] Sent 'Hello Guidemy Students 5'
 Done
 ```
+
+### Work Queues or Task Queues
+
+![WorkQueue](WorkQueue.PNG)
+
+Use cases:
+
+- Distribute time-consuming tasks among multiple clients (workers)
+- Introduce asynchronous HTTP calls to RESTful services
+
