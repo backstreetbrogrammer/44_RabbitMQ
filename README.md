@@ -21,6 +21,7 @@ Tools used:
 4. [RabbitMQ Hands On](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#chapter-04-rabbitmq-hands-on)
     - [Simple Queue](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#simple-queue)
     - [Work Queues or Task Queues](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#work-queues-or-task-queues)
+    - [Publish-Subscribe Fan-out](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#publish--subscribe-fan--out)
 
 ---
 
@@ -823,6 +824,274 @@ Done
 
 Use cases:
 
-- Distribute time-consuming tasks among multiple clients (workers)
+- Distribute time-consuming tasks among multiple consumers (workers)
 - Introduce asynchronous HTTP calls to RESTful services
+
+**_Hands on_**
+
+- Start RabbitMQ and open Web Admin
+- Create three tabs for Queue `q.application1.events`: one for producer and the other two for consumers.
+
+- Publish six **persistent** Json messages one by one:
+
+![PublishSimpleQueue](PublishSimpleQueue.PNG)
+
+```json
+{
+  "message": "Hello Students #1"
+}
+```
+
+```json
+{
+  "message": "Hello Students #2"
+}
+```
+
+...
+
+...
+
+```json
+{
+  "message": "Hello Students #6"
+}
+```
+
+- From one of the two consumers, consume the _first_ message as Ack Mode: **"Automatic ack"**:
+
+![ConsumeSimpleQueue](ConsumeSimpleQueue.PNG)
+
+- From the second consumer, consume the _second_ message as Ack Mode: **"Automatic ack"**: it will consume the _second_
+  message **"Hello Students #2"**
+
+The main point here is that a message can be consumed by only one consumer, and then it will be **removed** from the
+queue.
+
+- From the first consumer, consume the _third_ message as Ack Mode: **"Nack message requeue true"**: it will consume
+  the _third_ message but give negative ack -> meaning that the message will be placed again in the queue
+
+- If we consume from second consumer as Ack Mode: **"Automatic ack"**: it will consume the same _third_ message
+
+- From the first consumer, consume the _fourth_ message as Ack Mode: **"Reject requeue false"**: it will consume and
+  reject the _fourth_ message and also **remove** it from the queue
+
+- If we consume from second consumer as Ack Mode: **"Automatic ack"**: it will consume the _fifth_ message and not
+  the _fourth_ message
+
+- From the first consumer, consume the _sixth_ message as Ack Mode: **"Reject requeue true"**: it will consume and
+  reject the _fourth_ message but place it again in the queue
+
+- If we consume from second consumer as Ack Mode: **"Automatic ack"**: it will consume the same _sixth_ message and
+  now our queue is empty
+
+To summarize work queues,
+
+- **Round-robin dispatching**: Sends each message to the next consumer in a _sequence_
+- **Message acknowledgment**: As default, a message delivered into consumer is marked for _deletion_
+- **No message timeouts**: RabbitMQ redeliver message when consumer dies
+- **Prefetch**: RabbitMQ dispatches a message when it enters the queue, here we want consumer to handle one message at a
+  time => thus we need to monitor queue size as if all workers are busy, queue can easily fill up
+
+**_Code Demo_**
+
+Producer class:
+
+```java
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.MessageProperties;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeoutException;
+
+public class WorkerQueueProducer extends Thread {
+
+    private final String queueName;
+
+    public WorkerQueueProducer(final String queueName) {
+        this.queueName = queueName;
+    }
+
+    @Override
+    public void run() {
+        System.out.println("--> Running producer");
+
+        final ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("localhost");
+        factory.setPort(5673);
+
+        try (final Connection connection = factory.newConnection();
+             final Channel channel = connection.createChannel()) {
+
+            channel.queueDeclare(queueName,
+                    /*durable*/    true,
+                    /*exclusive*/  false,
+                    /*autoDelete*/ false,
+                    /*arguments*/  null);
+
+            for (int i = 0; i <= 5; i++) {
+                final String message = String.format("Hello Guidemy Students %d", i);
+
+                channel.basicPublish(/*exchange*/"", /*routingKey*/ queueName,
+                                                 MessageProperties.PERSISTENT_TEXT_PLAIN,
+                                                 message.getBytes(StandardCharsets.UTF_8));
+                System.out.printf(" [P] Sent '%s'%n", message);
+                sleep(20L);
+            }
+        } catch (final IOException | TimeoutException | InterruptedException e) {
+            System.err.println(e.getMessage());
+        }
+    }
+}
+```
+
+Worker class:
+
+```java
+import com.rabbitmq.client.AMQP.Queue.DeclareOk;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.DeliverCallback;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeoutException;
+
+public class WorkerQueueConsumer extends Thread {
+
+    private final String queueName;
+    private final String workerName;
+
+    public WorkerQueueConsumer(final String queueName, final String workerName) {
+        this.queueName = queueName;
+        this.workerName = workerName;
+    }
+
+    @Override
+    public void run() {
+        System.out.println("--> Running consumer");
+
+        final ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("localhost");
+        factory.setPort(5673);
+
+        try (final Connection connection = factory.newConnection();
+             final Channel channel = connection.createChannel()) {
+
+            final DeclareOk rc = channel.queueDeclare(queueName,
+                    /*durable*/    true,
+                    /*exclusive*/  false,
+                    /*autoDelete*/ false,
+                    /*arguments*/  null);
+
+            System.out.printf(" [C] %s %d messages in the queue, waiting for messages....%n",
+                              workerName,
+                              rc.getMessageCount());
+
+            channel.basicQos(/*prefetchCount*/1);
+
+            final DeliverCallback deliverCallback = (consumerTag, delivery) -> {
+                final String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
+
+                System.out.printf(" [C] %s received '%s'%n", workerName, message);
+                try {
+                    try {
+                        final int randomInt = (int) (10.0 * Math.random());
+                        sleep(1000L + randomInt * 10L);
+                    } catch (final InterruptedException _ignored) {
+                        interrupt();
+                    }
+                } finally {
+                    System.out.printf(" [C] %s processed, acknowledging...%n", workerName);
+                    channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
+                    // channel.basicNack(delivery.getEnvelope().getDeliveryTag(), false, /*requeue*/true);
+                    // channel.basicReject(delivery.getEnvelope().getDeliveryTag(), true);
+                }
+            };
+
+            channel.basicConsume(queueName,
+                                 false,
+                                 deliverCallback,
+                                 consumerTag -> {
+                                 });
+
+            //sleep(Long.MAX_VALUE);
+            sleep(12_000L);
+
+        } catch (final IOException | TimeoutException | InterruptedException e) {
+            System.err.println(e.getMessage());
+        }
+    }
+
+}
+```
+
+Main program for demo:
+
+```java
+public class WorkerQueueDemo {
+
+    private final static String QUEUE_NAME = "worker_queue";
+
+    public static void main(final String[] args) throws InterruptedException {
+        final WorkerQueueProducer producer = new WorkerQueueProducer(QUEUE_NAME);
+        producer.start();
+
+        final WorkerQueueConsumer worker1 = new WorkerQueueConsumer(QUEUE_NAME, "worker1");
+        worker1.start();
+
+        final WorkerQueueConsumer worker2 = new WorkerQueueConsumer(QUEUE_NAME, "worker2");
+        worker2.start();
+
+        producer.join();
+        worker1.join();
+        worker2.join();
+
+        System.out.println("Done");
+    }
+
+}
+```
+
+Sample output of the program:
+
+```
+--> Running producer
+--> Running consumer
+--> Running consumer
+ [C] worker2 0 messages in the queue, waiting for messages....
+ [C] worker1 0 messages in the queue, waiting for messages....
+ [P] Sent 'Hello Guidemy Students 0'
+ [C] worker1 received 'Hello Guidemy Students 0'
+ [P] Sent 'Hello Guidemy Students 1'
+ [C] worker2 received 'Hello Guidemy Students 1'
+ [P] Sent 'Hello Guidemy Students 2'
+ [P] Sent 'Hello Guidemy Students 3'
+ [P] Sent 'Hello Guidemy Students 4'
+ [P] Sent 'Hello Guidemy Students 5'
+ [C] worker2 processed, acknowledging...
+ [C] worker2 received 'Hello Guidemy Students 2'
+ [C] worker1 processed, acknowledging...
+ [C] worker1 received 'Hello Guidemy Students 3'
+ [C] worker1 processed, acknowledging...
+ [C] worker1 received 'Hello Guidemy Students 4'
+ [C] worker2 processed, acknowledging...
+ [C] worker2 received 'Hello Guidemy Students 5'
+ [C] worker1 processed, acknowledging...
+ [C] worker2 processed, acknowledging...
+Done
+```
+
+### Publish-Subscribe Fan-out
+
+![PubSubFanout](PubSubFanout.PNG)
+
+Use cases:
+
+- Notifications
+- Feeds
 
