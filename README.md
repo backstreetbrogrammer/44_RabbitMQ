@@ -1095,3 +1095,38 @@ Use cases:
 - Notifications
 - Feeds
 
+**_Hands on_**
+
+- Start RabbitMQ and open Web Admin
+- Create two new queues: `q.events.client1` and `q.events.client2`
+
+![NewQueueFanout](NewQueueFanout.PNG)
+
+- Create a new fan-out exchange: `ex.events`:
+
+![NewExchangeFanout](NewExchangeFanout.PNG)
+
+- Bind the two queues to the new exchange:
+
+![BindExchange](BindExchange.PNG)
+
+- Publish the message from the exchange:
+
+Payload:
+
+```json
+{
+  "message": "Virtual Threads are awesome"
+}
+```
+
+![PublishExchange](PublishExchange.PNG)
+
+- We can receive or get the message from both the bounded queues: `q.events.client1` and `q.events.client2`
+
+To summarize, **Publish-Subscribe Fan-out** is used to **_broadcast_** all the messages it receives to all the queues it
+is bounded to, ignoring the routing key.
+
+**_Code Demo_**
+
+
