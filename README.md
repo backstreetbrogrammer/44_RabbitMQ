@@ -21,7 +21,7 @@ Tools used:
 4. [RabbitMQ Hands On](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#chapter-04-rabbitmq-hands-on)
     - [Simple Queue](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#simple-queue)
     - [Work Queues or Task Queues](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#work-queues-or-task-queues)
-    - [Publish-Subscribe Fan-out](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#publish--subscribe-fan--out)
+    - [Publish-Subscribe Fan-out](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#publish-subscribe-fan-out)
 
 ---
 
