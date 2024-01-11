@@ -1129,4 +1129,166 @@ is bounded to, ignoring the routing key.
 
 **_Code Demo_**
 
+Publisher class:
+
+```java
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeoutException;
+
+public class FanoutProducer extends Thread {
+    private final String exchangeName;
+
+    public FanoutProducer(final String exchangeName) {
+        this.exchangeName = exchangeName;
+    }
+
+    @Override
+    public void run() {
+        System.out.println("--> Running producer");
+
+        final ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("localhost");
+        factory.setPort(5673);
+
+        try (final Connection connection = factory.newConnection();
+             final Channel channel = connection.createChannel()) {
+
+            channel.exchangeDeclare(exchangeName, "fanout");
+
+            for (int i = 0; i <= 5; i++) {
+                final String message = String.format("Hello Guidemy Students %d", i);
+                channel.basicPublish(exchangeName, "", null, message.getBytes(StandardCharsets.UTF_8));
+                System.out.printf(" [P] Sent '%s'%n", message);
+                sleep(20L);
+            }
+
+        } catch (final IOException | TimeoutException | InterruptedException e) {
+            System.err.println(e.getMessage());
+        }
+    }
+}
+```
+
+Subscriber class:
+
+```java
+import com.rabbitmq.client.AMQP.Queue.BindOk;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.DeliverCallback;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeoutException;
+
+public class FanoutConsumer extends Thread {
+
+    private final String exchangeName;
+    private final String workerName;
+
+    public FanoutConsumer(final String exchangeName, final String workerName) {
+        this.exchangeName = exchangeName;
+        this.workerName = workerName;
+    }
+
+    @Override
+    public void run() {
+        System.out.println("--> Running consumer");
+
+        final ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("localhost");
+        factory.setPort(5673);
+
+        try (final Connection connection = factory.newConnection();
+             final Channel channel = connection.createChannel()) {
+
+            channel.exchangeDeclare(exchangeName, "fanout");
+
+            final String queueName = channel.queueDeclare().getQueue();
+            final BindOk rc = channel.queueBind(queueName, exchangeName, /*routingKey*/"");
+
+            System.out.printf(" [C] %s, waiting for messages....%n", workerName);
+
+            final DeliverCallback deliverCallback = (consumerTag, delivery) -> {
+                final String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
+                System.out.printf(" [C] %s received '%s'%n", workerName, message);
+            };
+
+            channel.basicConsume(queueName,
+                                 true,
+                                 deliverCallback,
+                                 consumerTag -> {
+                                 });
+
+            //sleep(Long.MAX_VALUE);
+            sleep(12_000L);
+
+        } catch (final TimeoutException | IOException | InterruptedException e) {
+            System.err.println(e.getMessage());
+        }
+    }
+}
+```
+
+Main program for demo:
+
+```java
+public class PublishSubscribeDemo {
+
+    private static final String EXCHANGE_NAME = "logs";
+
+    public static void main(final String[] args) throws InterruptedException {
+        final FanoutProducer producer = new FanoutProducer(EXCHANGE_NAME);
+        producer.start();
+
+        final FanoutConsumer worker1 = new FanoutConsumer(EXCHANGE_NAME, "worker1");
+        worker1.start();
+
+        final FanoutConsumer worker2 = new FanoutConsumer(EXCHANGE_NAME, "worker2");
+        worker2.start();
+
+        producer.join();
+        worker1.join();
+        worker2.join();
+
+        System.out.println("Done");
+    }
+
+}
+```
+
+Sample output of the program:
+
+```
+--> Running producer
+--> Running consumer
+--> Running consumer
+ [C] worker2, waiting for messages....
+ [C] worker1, waiting for messages....
+ [P] Sent 'Hello Guidemy Students 0'
+ [C] worker2 received 'Hello Guidemy Students 0'
+ [C] worker1 received 'Hello Guidemy Students 0'
+ [P] Sent 'Hello Guidemy Students 1'
+ [C] worker1 received 'Hello Guidemy Students 1'
+ [C] worker2 received 'Hello Guidemy Students 1'
+ [P] Sent 'Hello Guidemy Students 2'
+ [C] worker1 received 'Hello Guidemy Students 2'
+ [C] worker2 received 'Hello Guidemy Students 2'
+ [P] Sent 'Hello Guidemy Students 3'
+ [C] worker2 received 'Hello Guidemy Students 3'
+ [C] worker1 received 'Hello Guidemy Students 3'
+ [P] Sent 'Hello Guidemy Students 4'
+ [C] worker2 received 'Hello Guidemy Students 4'
+ [C] worker1 received 'Hello Guidemy Students 4'
+ [P] Sent 'Hello Guidemy Students 5'
+ [C] worker1 received 'Hello Guidemy Students 5'
+ [C] worker2 received 'Hello Guidemy Students 5'
+Done
+```
 
