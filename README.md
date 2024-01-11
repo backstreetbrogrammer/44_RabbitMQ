@@ -22,6 +22,7 @@ Tools used:
     - [Simple Queue](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#simple-queue)
     - [Work Queues or Task Queues](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#work-queues-or-task-queues)
     - [Publish-Subscribe Fan-out](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#publish-subscribe-fan-out)
+    - [Publish-Subscribe based on Routing](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#publish-subscribe-based-on-routing)
 
 ---
 
@@ -1291,4 +1292,70 @@ Sample output of the program:
  [C] worker2 received 'Hello Guidemy Students 5'
 Done
 ```
+
+### Publish-Subscribe based on Routing
+
+![PubSubRouting](PubSubRouting.PNG)
+
+Use cases:
+
+- Notifications based on a key
+- Feeds based on a key
+
+**_Hands on_**
+
+- Start RabbitMQ and open Web Admin
+- Remove the previous bindings from the queues: `q.events.client1` and `q.events.client2`
+
+![UnbindQueue](UnbindQueue.PNG)
+
+- Delete the exchange: `ex.events`
+
+![DeleteExchange](DeleteExchange.PNG)
+
+- Add a new `direct` exchange with the same name: `ex.events`
+
+![AddDirectExchange](AddDirectExchange.PNG)
+
+- Bind the exchange with queue `q.events.client1` and routing key as `sport`
+
+![BindWithRouting](BindWithRouting.PNG)
+
+- Bind the exchange with queue `q.events.client2` and routing keys as `sport` and `weather`
+
+![BindWithAllRoutings](BindWithAllRoutings.PNG)
+
+- Publish a message with routing key as `sport`, both the queues will receive it
+
+Payload:
+
+```json
+{
+  "message": "This is a sports event"
+}
+```
+
+![PublishSports](PublishSports.PNG)
+
+- Publish a message with routing key as `weather`, only `q.events.client2` will receive it
+
+Payload:
+
+```json
+{
+  "message": "This is a weather event"
+}
+```
+
+![PublishWeather](PublishWeather.PNG)
+
+![QueuesRoutingKeys](QueuesRoutingKeys.PNG)
+
+To summarize Publish-Subscribe based on Routing,
+
+- Direct exchange routes to specific queue
+- Routing key is matched with a binding key to route **subset of messages** to bound queues
+- Many categories of messages cause a lot of bindings - it complicates the administration of RabbitMQ
+
+**_Code Demo_**
 
