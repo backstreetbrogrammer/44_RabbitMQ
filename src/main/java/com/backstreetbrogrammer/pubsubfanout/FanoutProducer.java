@@ -1,5 +1,6 @@
 package com.backstreetbrogrammer.pubsubfanout;
 
+import com.rabbitmq.client.BuiltinExchangeType;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
@@ -26,7 +27,7 @@ public class FanoutProducer extends Thread {
         try (final Connection connection = factory.newConnection();
              final Channel channel = connection.createChannel()) {
 
-            channel.exchangeDeclare(exchangeName, "fanout");
+            channel.exchangeDeclare(exchangeName, BuiltinExchangeType.FANOUT);
 
             for (int i = 0; i <= 5; i++) {
                 final String message = String.format("Hello Guidemy Students %d", i);

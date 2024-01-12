@@ -23,6 +23,7 @@ Tools used:
     - [Work Queues or Task Queues](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#work-queues-or-task-queues)
     - [Publish-Subscribe Fan-out](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#publish-subscribe-fan-out)
     - [Publish-Subscribe based on Routing](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#publish-subscribe-based-on-routing)
+    - [Publish-Subscribe based on Topics](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#publish-subscribe-based-on-topics)
 
 ---
 
@@ -1133,6 +1134,7 @@ is bounded to, ignoring the routing key.
 Publisher class:
 
 ```java
+import com.rabbitmq.client.BuiltinExchangeType;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
@@ -1159,7 +1161,7 @@ public class FanoutProducer extends Thread {
         try (final Connection connection = factory.newConnection();
              final Channel channel = connection.createChannel()) {
 
-            channel.exchangeDeclare(exchangeName, "fanout");
+            channel.exchangeDeclare(exchangeName, BuiltinExchangeType.FANOUT);
 
             for (int i = 0; i <= 5; i++) {
                 final String message = String.format("Hello Guidemy Students %d", i);
@@ -1178,11 +1180,8 @@ public class FanoutProducer extends Thread {
 Subscriber class:
 
 ```java
+import com.rabbitmq.client.*;
 import com.rabbitmq.client.AMQP.Queue.BindOk;
-import com.rabbitmq.client.Channel;
-import com.rabbitmq.client.Connection;
-import com.rabbitmq.client.ConnectionFactory;
-import com.rabbitmq.client.DeliverCallback;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -1209,7 +1208,7 @@ public class FanoutConsumer extends Thread {
         try (final Connection connection = factory.newConnection();
              final Channel channel = connection.createChannel()) {
 
-            channel.exchangeDeclare(exchangeName, "fanout");
+            channel.exchangeDeclare(exchangeName, BuiltinExchangeType.FANOUT);
 
             final String queueName = channel.queueDeclare().getQueue();
             final BindOk rc = channel.queueBind(queueName, exchangeName, /*routingKey*/"");
@@ -1358,4 +1357,429 @@ To summarize Publish-Subscribe based on Routing,
 - Many categories of messages cause a lot of bindings - it complicates the administration of RabbitMQ
 
 **_Code Demo_**
+
+Routing publisher class:
+
+```java
+import com.rabbitmq.client.BuiltinExchangeType;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeoutException;
+
+public class RoutingProducer extends Thread {
+
+    private final String exchangeName;
+
+    public RoutingProducer(final String exchangeName) {
+        this.exchangeName = exchangeName;
+    }
+
+    @Override
+    public void run() {
+        System.out.println("--> Running producer");
+
+        final ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("localhost");
+        factory.setPort(5673);
+
+        try (final Connection connection = factory.newConnection();
+             final Channel channel = connection.createChannel()) {
+
+            channel.exchangeDeclare(exchangeName, BuiltinExchangeType.DIRECT);
+
+            channel.basicPublish(exchangeName, "info", null, "Information message".getBytes(StandardCharsets.UTF_8));
+            channel.basicPublish(exchangeName, "warning", null, "Warning message".getBytes(StandardCharsets.UTF_8));
+            channel.basicPublish(exchangeName, "error", null, "Error message".getBytes(StandardCharsets.UTF_8));
+            channel.basicPublish(exchangeName, "critical", null, "Critical message".getBytes(StandardCharsets.UTF_8));
+
+            System.out.println(" [P] Sent 4 events");
+        } catch (final IOException | TimeoutException e) {
+            System.err.println(e.getMessage());
+        }
+    }
+
+}
+```
+
+Routing consumer class:
+
+```java
+import com.rabbitmq.client.*;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.concurrent.TimeoutException;
+
+public class RoutingConsumer extends Thread {
+
+    private final String exchangeName;
+    private final String workerName;
+    private final List<String> levels;
+
+    public RoutingConsumer(final String exchangeName, final String workerName, final List<String> levels) {
+        this.exchangeName = exchangeName;
+        this.workerName = workerName;
+        this.levels = levels;
+    }
+
+    @Override
+    public void run() {
+        System.out.println("--> Running consumer");
+
+        final ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("localhost");
+        factory.setPort(5673);
+
+        try (final Connection connection = factory.newConnection();
+             final Channel channel = connection.createChannel()) {
+
+            channel.exchangeDeclare(exchangeName, BuiltinExchangeType.DIRECT);
+            final String queueName = channel.queueDeclare().getQueue();
+
+            for (final String level : levels) {
+                channel.queueBind(queueName, exchangeName, level);
+            }
+            System.out.printf(" [C] %s, waiting for messages....%n", workerName);
+
+            final DeliverCallback deliverCallback = (consumerTag, delivery) -> {
+                final String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
+                System.out.printf(" [C] %s received '%s':'%s'%n", workerName,
+                                  delivery.getEnvelope().getRoutingKey(),
+                                  message);
+            };
+
+            channel.basicConsume(queueName,
+                                 true,
+                                 deliverCallback,
+                                 consumerTag -> {
+                                 });
+
+            //sleep(Long.MAX_VALUE);
+            sleep(12_000L);
+
+        } catch (final TimeoutException | IOException | InterruptedException e) {
+            System.err.println(e.getMessage());
+        }
+    }
+}
+```
+
+Main program for the demo run:
+
+```java
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.concurrent.TimeUnit;
+
+public class RoutingDemo {
+
+    private static final String EXCHANGE_NAME = "direct_logs";
+
+    public static void main(final String[] args) throws InterruptedException {
+        final RoutingConsumer worker1 = new RoutingConsumer(EXCHANGE_NAME,
+                                                            "worker_all",
+                                                            Arrays.asList("info", "warning", "error", "critical"));
+        worker1.start();
+
+        final RoutingConsumer worker2 = new RoutingConsumer(EXCHANGE_NAME,
+                                                            "worker_err",
+                                                            Collections.singletonList("error"));
+        worker2.start();
+
+        TimeUnit.MILLISECONDS.sleep(2000L);
+
+        final RoutingProducer producer = new RoutingProducer(EXCHANGE_NAME);
+        producer.start();
+
+        producer.join();
+        worker1.join();
+        worker2.join();
+
+        System.out.println("Done");
+    }
+
+}
+```
+
+Sample output:
+
+```
+--> Running consumer
+--> Running consumer
+ [C] worker_err, waiting for messages....
+ [C] worker_all, waiting for messages....
+--> Running producer
+ [P] Sent 4 events
+ [C] worker_err received 'error':'Error message'
+ [C] worker_all received 'info':'Information message'
+ [C] worker_all received 'warning':'Warning message'
+ [C] worker_all received 'error':'Error message'
+ [C] worker_all received 'critical':'Critical message'
+Done
+```
+
+### Publish-Subscribe based on Topics
+
+![PubSubTopics](PubSubTopics.PNG)
+
+Use cases:
+
+- Notifications based on a topic
+- Feeds based on a topic
+
+Topic is a kind of routing key defined as a list of words, delimited by dots.
+
+Binding is a simple regular expression where:
+
+- `*` (star) can substitute exactly one word
+- `#` (hash) can substitute zero or more words
+
+Publish-Subscribe based on **Topics** can reduce the number of bindings if compared with Publish-Subscribe based on
+**Routing Keys** => because of the use of regular expressions.
+
+For ex: if one client is listening to a topic `*.sport.*` and another client is listening on topics `*.sport.#`
+and `*.weather.hk.*`, then all these messages on topics can be consumed by just two clients:
+
+```
+event.sport.football
+event.sport.football.fcbarcelona
+event.sport
+event.weather.local-alerts
+event.weather.hk
+event.weather.hk.local
+```
+
+**_Hands on_**
+
+- Start RabbitMQ and open Web Admin
+- Remove the previous bindings from the queues: `q.events.client1` and `q.events.client2`
+
+![UnbindQueue](UnbindQueue.PNG)
+
+- Delete the exchange: `ex.events`
+
+![DeleteExchange](DeleteExchange.PNG)
+
+- Add a new `topic` exchange with the same name: `ex.events`
+
+![AddTopicExchange](AddTopicExchange.PNG)
+
+- Bind the exchange with queue `q.events.client1` and routing key as `*.sport.*`
+
+![BindWithTopic](BindWithTopic.PNG)
+
+- Bind the exchange with queue `q.events.client2` and routing keys as `*.sport.#` and `*.weather.hk.*`
+
+![BindWithAllTopics](BindWithAllTopics.PNG)
+
+- Publish a message with routing key as `event.sport`, only `q.events.client2` will receive it
+
+Payload:
+
+**_Sports_**
+
+```json
+{
+  "message": "This is a sports event"
+}
+```
+
+**_Weather_**
+
+```json
+{
+  "message": "This is a weather event"
+}
+```
+
+We can choose various routing keys, and based on the regular expression, the appropriate client will consume it.
+
+```
+event.sport.football
+event.sport.football.fcbarcelona
+event.sport
+event.weather.local-alerts
+event.weather.hk
+event.weather.hk.local
+```
+
+To summarize Publish-Subscribe based on Topics,
+
+- Topic limit is 255 characters: List of words, delimited by dots
+- No words limit: A word can be any string; should specify feature hierarchy
+- Substitutions: `*` (star) exactly one word; `#` (hash) zero or more words
+- Define topic names wisely => Topic must represent a hierarchy, for ex: `event.weather.kowloon.hk`
+
+**_Code Demo_**
+
+Topics producer class
+
+```java
+import com.rabbitmq.client.BuiltinExchangeType;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeoutException;
+
+public class TopicsProducer extends Thread {
+    private final String exchangeName;
+
+    public TopicsProducer(final String exchangeName) {
+        this.exchangeName = exchangeName;
+    }
+
+    @Override
+    public void run() {
+        System.out.println("--> Running producer");
+
+        final ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("localhost");
+        factory.setPort(5673);
+
+        try (final Connection connection = factory.newConnection();
+             final Channel channel = connection.createChannel()) {
+
+            channel.exchangeDeclare(exchangeName, BuiltinExchangeType.TOPIC);
+
+            channel.basicPublish(exchangeName, "application1.logs.error", null,
+                                 "Sample Error Message from App1".getBytes(StandardCharsets.UTF_8));
+            channel.basicPublish(exchangeName, "application1.logs.info", null,
+                                 "Sample Info Message from App1".getBytes(StandardCharsets.UTF_8));
+            channel.basicPublish(exchangeName, "application2.logs.error", null,
+                                 "Sample Error Message from App2".getBytes(StandardCharsets.UTF_8));
+            channel.basicPublish(exchangeName, "application2.logs.debug", null,
+                                 "Sample Debug Message from App2".getBytes(StandardCharsets.UTF_8));
+
+            System.out.println(" [P] Sent 4 example messages");
+
+        } catch (final IOException | TimeoutException e) {
+            System.err.println(e.getMessage());
+        }
+    }
+}
+```
+
+Topics consumer class
+
+```java
+import com.rabbitmq.client.*;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.concurrent.TimeoutException;
+
+public class TopicsConsumer extends Thread {
+
+    private final String exchangeName;
+    private final String workerName;
+    private final List<String> topics;
+
+    public TopicsConsumer(final String exchangeName, final String workerName, final List<String> topics) {
+        this.exchangeName = exchangeName;
+        this.workerName = workerName;
+        this.topics = topics;
+    }
+
+    @Override
+    public void run() {
+        System.out.println("--> Running consumer");
+
+        final ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("localhost");
+        factory.setPort(5673);
+
+        try (final Connection connection = factory.newConnection();
+             final Channel channel = connection.createChannel()) {
+
+            channel.exchangeDeclare(exchangeName, BuiltinExchangeType.TOPIC);
+            final String queueName = channel.queueDeclare().getQueue();
+
+            for (final String topic : topics) {
+                channel.queueBind(queueName, exchangeName, topic);
+            }
+            System.out.printf(" [C] %s, waiting for messages....%n", workerName);
+
+            final DeliverCallback deliverCallback = (consumerTag, delivery) -> {
+                final String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
+                System.out.printf(" [C] %s received '%s':'%s'%n", workerName,
+                                  delivery.getEnvelope().getRoutingKey(),
+                                  message);
+            };
+
+            channel.basicConsume(queueName,
+                                 true,
+                                 deliverCallback,
+                                 consumerTag -> {
+                                 });
+
+            //sleep(Long.MAX_VALUE);
+            sleep(12_000L);
+
+        } catch (final TimeoutException | IOException | InterruptedException e) {
+            System.err.println(e.getMessage());
+        }
+    }
+}
+```
+
+Main program for the demo run:
+
+```java
+import java.util.Collections;
+import java.util.concurrent.TimeUnit;
+
+public class TopicsDemo {
+
+    private static final String EXCHANGE_NAME = "topic_logs";
+
+    public static void main(final String[] args) throws InterruptedException {
+        final TopicsConsumer worker1 = new TopicsConsumer(EXCHANGE_NAME,
+                                                          "worker_all_errors",
+                                                          Collections.singletonList("*.logs.error"));
+        worker1.start();
+
+        final TopicsConsumer worker2 = new TopicsConsumer(EXCHANGE_NAME,
+                                                          "worker_app1",
+                                                          Collections.singletonList("application1.#"));
+        worker2.start();
+
+        TimeUnit.MILLISECONDS.sleep(2000L);
+
+        final TopicsProducer producer = new TopicsProducer(EXCHANGE_NAME);
+        producer.start();
+
+        producer.join();
+        worker1.join();
+        worker2.join();
+
+        System.out.println("Done");
+    }
+
+}
+```
+
+Sample output:
+
+```
+--> Running consumer
+--> Running consumer
+ [C] worker_app1, waiting for messages....
+ [C] worker_all_errors, waiting for messages....
+--> Running producer
+ [P] Sent 4 example messages
+ [C] worker_app1 received 'application1.logs.error':'Sample Error Message from App1'
+ [C] worker_app1 received 'application1.logs.info':'Sample Info Message from App1'
+ [C] worker_all_errors received 'application1.logs.error':'Sample Error Message from App1'
+ [C] worker_all_errors received 'application2.logs.error':'Sample Error Message from App2'
+Done
+```
 

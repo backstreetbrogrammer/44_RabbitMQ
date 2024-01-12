@@ -1,20 +1,22 @@
-package com.backstreetbrogrammer.pubsubfanout;
+package com.backstreetbrogrammer.pubsubtopics;
 
 import com.rabbitmq.client.*;
-import com.rabbitmq.client.AMQP.Queue.BindOk;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.TimeoutException;
 
-public class FanoutConsumer extends Thread {
+public class TopicsConsumer extends Thread {
 
     private final String exchangeName;
     private final String workerName;
+    private final List<String> topics;
 
-    public FanoutConsumer(final String exchangeName, final String workerName) {
+    public TopicsConsumer(final String exchangeName, final String workerName, final List<String> topics) {
         this.exchangeName = exchangeName;
         this.workerName = workerName;
+        this.topics = topics;
     }
 
     @Override
@@ -28,16 +30,19 @@ public class FanoutConsumer extends Thread {
         try (final Connection connection = factory.newConnection();
              final Channel channel = connection.createChannel()) {
 
-            channel.exchangeDeclare(exchangeName, BuiltinExchangeType.FANOUT);
-
+            channel.exchangeDeclare(exchangeName, BuiltinExchangeType.TOPIC);
             final String queueName = channel.queueDeclare().getQueue();
-            final BindOk rc = channel.queueBind(queueName, exchangeName, /*routingKey*/"");
 
+            for (final String topic : topics) {
+                channel.queueBind(queueName, exchangeName, topic);
+            }
             System.out.printf(" [C] %s, waiting for messages....%n", workerName);
 
             final DeliverCallback deliverCallback = (consumerTag, delivery) -> {
                 final String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
-                System.out.printf(" [C] %s received '%s'%n", workerName, message);
+                System.out.printf(" [C] %s received '%s':'%s'%n", workerName,
+                                  delivery.getEnvelope().getRoutingKey(),
+                                  message);
             };
 
             channel.basicConsume(queueName,
