@@ -4,7 +4,7 @@
 
 Tools used:
 
-- JDK 11
+- JDK 8
 - Maven
 - JUnit 5, Mockito
 - IntelliJ IDE
