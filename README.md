@@ -24,6 +24,7 @@ Tools used:
     - [Publish-Subscribe Fan-out](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#publish-subscribe-fan-out)
     - [Publish-Subscribe based on Routing](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#publish-subscribe-based-on-routing)
     - [Publish-Subscribe based on Topics](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#publish-subscribe-based-on-topics)
+    - [Publish-Subscribe based on Headers](https://github.com/backstreetbrogrammer/44_RabbitMQ?tab=readme-ov-file#publish-subscribe-based-on-headers)
 
 ---
 
@@ -1783,3 +1784,242 @@ Sample output:
 Done
 ```
 
+### Publish-Subscribe based on Headers
+
+![PubSubHeaders](PubSubHeaders.PNG)
+
+Use cases:
+
+- Notifications based on headers
+- Feeds based on headers
+
+Headers beginning with the String `"x-"` are not used to evaluate matches.
+
+**_Hands on_**
+
+- Start RabbitMQ and open Web Admin
+- Remove the previous bindings from the queues: `q.events.client1` and `q.events.client2`
+
+![UnbindQueue](UnbindQueue.PNG)
+
+- Delete the exchange: `ex.events`
+
+![DeleteExchange](DeleteExchange.PNG)
+
+- Add a new `headers` exchange with the same name: `ex.events`
+
+![AddHeadersExchange](AddHeadersExchange.PNG)
+
+- Bind the exchange with queue `q.events.client1` and headers as:
+
+![BindWithHeader](BindWithHeader.PNG)
+
+- Bind the exchange with queue `q.events.client2` and all bindings should look like this:
+
+![BindWithAllHeaders](BindWithAllHeaders.PNG)
+
+- Publish a message with headers as given, only `q.events.client2` will receive it as it is `x-match: any`
+
+![PublishHeaders](PublishHeaders.PNG)
+
+Payload:
+
+**_Sports_**
+
+```json
+{
+  "message": "This is a sports event"
+}
+```
+
+- Publish a message with headers as `category = sport` and `source = bbc`, both the clients will receive it
+- Publish a message with headers as `category = sport` and `source = cnn`, only `q.events.client2` will receive it
+
+To summarize Publish-Subscribe based on Headers,
+
+- Use **headers** from AMQP message structure: Key -> value pairs
+- No substitution: Header must exactly match to the list of headers defined in the binding
+- Ignores routing key: Like **fan-out** exchange, **headers** exchange ignores routing keys
+- More flexible than direct exchange: But sometimes harder to maintain
+
+**_Code Demo_**
+
+Headers producer class
+
+```java
+import com.rabbitmq.client.*;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.TimeoutException;
+
+public class HeadersProducer extends Thread {
+
+    private final String exchangeName;
+
+    public HeadersProducer(final String exchangeName) {
+        this.exchangeName = exchangeName;
+    }
+
+    @Override
+    public void run() {
+        System.out.println("--> Running producer");
+
+        final ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("localhost");
+        factory.setPort(5673);
+
+        try (final Connection connection = factory.newConnection();
+             final Channel channel = connection.createChannel()) {
+
+            channel.exchangeDeclare(exchangeName, BuiltinExchangeType.HEADERS);
+
+            publishSampleMessage(channel, "error", "Sample Error Message from App1");
+            publishSampleMessage(channel, "info", "Sample Info Message from App1");
+            publishSampleMessage(channel, "error", "Sample Error Message from App2");
+            publishSampleMessage(channel, "debug", "Sample Debug Message from App2");
+
+            System.out.println(" [P] Sent 4 example messages");
+        } catch (final IOException | TimeoutException e) {
+            System.err.println(e.getMessage());
+        }
+    }
+
+    private void publishSampleMessage(final Channel channel, final String header, final String message) throws IOException {
+        final Map<String, Object> map = new HashMap<>();
+        map.put("x-match", "any");   //all or any
+        map.put("my-header-severity", header);
+        map.put("my-custom-header", "hello");
+        final AMQP.BasicProperties props = new AMQP.BasicProperties
+                .Builder()
+                .headers(map)
+                .build();
+
+        channel.basicPublish(exchangeName, /*routingKey*/"", props, message.getBytes(StandardCharsets.UTF_8));
+    }
+}
+```
+
+Headers consumer class
+
+```java
+import com.rabbitmq.client.*;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeoutException;
+
+public class HeadersConsumer extends Thread {
+
+    private final String exchangeName;
+    private final String workerName;
+    private final List<String> headers;
+
+    public HeadersConsumer(final String exchangeName, final String workerName, final List<String> headers) {
+        this.exchangeName = exchangeName;
+        this.workerName = workerName;
+        this.headers = headers;
+    }
+
+    @Override
+    public void run() {
+        System.out.println("--> Running consumer");
+
+        final ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("localhost");
+        factory.setPort(5673);
+
+        try (final Connection connection = factory.newConnection();
+             final Channel channel = connection.createChannel()) {
+
+            channel.exchangeDeclare(exchangeName, BuiltinExchangeType.HEADERS);
+            final String queueName = channel.queueDeclare().getQueue();
+
+            for (final String header : headers) {
+                final Map<String, Object> map = new HashMap<>();
+                map.put("x-match", "any");   //all or any
+                map.put("my-header-severity", header);
+                map.put("my-custom2", "bambo");
+                channel.queueBind(queueName, exchangeName, "", map);
+            }
+
+            System.out.printf(" [C] %s, waiting for messages....%n", workerName);
+
+            final DeliverCallback deliverCallback = (consumerTag, delivery) -> {
+                final String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
+                System.out.printf(" [C] %s received '%s':'%s'%n", workerName,
+                                  delivery.getEnvelope().getRoutingKey(),
+                                  message);
+            };
+
+            channel.basicConsume(queueName,
+                                 true,
+                                 deliverCallback,
+                                 consumerTag -> {
+                                 });
+
+            //sleep(Long.MAX_VALUE);
+            sleep(12_000L);
+
+        } catch (final TimeoutException | IOException | InterruptedException e) {
+            System.err.println(e.getMessage());
+        }
+    }
+}
+```
+
+Main program for the demo run:
+
+```java
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.concurrent.TimeUnit;
+
+public class HeadersDemo {
+
+    private static final String EXCHANGE_NAME = "header_logs_exchange";
+
+    public static void main(final String[] args) throws InterruptedException {
+        final HeadersConsumer worker1 = new HeadersConsumer(EXCHANGE_NAME,
+                                                            "worker_errors",
+                                                            Collections.singletonList("error"));
+        worker1.start();
+
+        final HeadersConsumer worker2 = new HeadersConsumer(EXCHANGE_NAME,
+                                                            "worker_info_warn",
+                                                            Arrays.asList("info", "warn"));
+        worker2.start();
+
+        TimeUnit.MILLISECONDS.sleep(2000L);
+
+        final HeadersProducer producer = new HeadersProducer(EXCHANGE_NAME);
+        producer.start();
+
+        producer.join();
+        worker1.join();
+        worker2.join();
+
+        System.out.println("Done");
+    }
+}
+```
+
+Sample output:
+
+```
+--> Running consumer
+--> Running consumer
+ [C] worker_errors, waiting for messages....
+ [C] worker_info_warn, waiting for messages....
+--> Running producer
+ [P] Sent 4 example messages
+ [C] worker_errors received '':'Sample Error Message from App1'
+ [C] worker_info_warn received '':'Sample Info Message from App1'
+ [C] worker_errors received '':'Sample Error Message from App2'
+Done
+```
